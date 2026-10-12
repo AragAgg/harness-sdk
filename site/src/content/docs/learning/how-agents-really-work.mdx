@@ -5,12 +5,18 @@ redirectFrom:
   - docs/community/learning/lesson1-how-agents-really-work
 ---
 
+import CourseNotice from '../../../components/CourseNotice.astro'
+
+<CourseNotice title="Before you follow along">
+
+This video is a snapshot in time. Some APIs and examples have changed since
+recording. Follow the code on this page, and look for "Changed since recording"
+notices below.
+
+</CourseNotice>
+
 <YouTube id="ZpXWGjISMs8" title="Lesson 1: How Agents Really Work" />
 *[Watch on YouTube](https://www.youtube.com/watch?v=ZpXWGjISMs8&list=PLDzwjhH-4yhU)*
-
-:::note[About this lesson]
-The videos in this course are a snapshot in time. Strands is under active development, so the code featured on this page reflects the most up-to-date patterns, but the concepts covered in the video still apply. When in doubt, trust the code.
-:::
 
 *Code for this lesson: [`samples/01-agent-loop`](https://github.com/aws-samples/sample-building-with-strands-course/tree/main/samples/01-agent-loop)*
 
@@ -64,11 +70,20 @@ print(response)
 
 ## Code: Agent with Tools
 
+<CourseNotice>
+
+The samples use SDK-vended `file_editor`, `shell`, and `web_fetch` instead of
+the older community-tool imports. Web fetching needs the optional dependencies:
+`pip install "strands-agents[web-fetch]"`. Use the imports shown below.
+
+</CourseNotice>
+
 The `web_fetch` vended tool pulls in an HTML parser, so install the SDK with that extra: `pip install 'strands-agents[web-fetch]'`.
 
 ```python
 from strands import Agent, tool
-from strands.vended_tools import file_editor, web_fetch
+from strands.vended_tools import file_editor
+from strands.vended_tools.web_fetch import web_fetch
 
 @tool
 def query_product_database(query: str) -> str:

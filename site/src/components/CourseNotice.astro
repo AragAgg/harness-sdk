@@ -1,0 +1,59 @@
+---
+interface Props {
+  title?: string
+  variant?: 'warning' | 'addition'
+}
+const { title = 'Changed since recording', variant = 'warning' } = Astro.props
+---
+
+<aside class:list={['course-notice', { 'course-notice--addition': variant === 'addition' }]} aria-label={title || undefined}>
+  {title && <p class="course-notice__title">{title}</p>}
+  <slot />
+</aside>
+
+<style>
+  .course-notice {
+    margin-block: 1.5rem;
+    padding: 1rem 1.25rem;
+    border: 1px solid #c84343;
+    border-inline-start-width: 4px;
+    border-radius: 0.35rem;
+    background: #fff1f1;
+    color: #542020;
+  }
+  .course-notice__title {
+    margin: 0 0 0.5rem;
+    font-weight: 700;
+    color: #9b2525;
+  }
+  .course-notice :global(> :last-child) {
+    margin-bottom: 0;
+  }
+  .course-notice :global(> :first-child) {
+    margin-top: 0;
+  }
+  :global([data-theme='dark']) .course-notice {
+    background: #321c22;
+    border-color: #e88080;
+    color: #f8dcdc;
+  }
+  :global([data-theme='dark']) .course-notice__title {
+    color: #ffa5a5;
+  }
+  .course-notice--addition {
+    border-color: #348348;
+    background: #eff9f0;
+    color: #214b2b;
+  }
+  .course-notice--addition .course-notice__title {
+    color: #246335;
+  }
+  :global([data-theme='dark']) .course-notice--addition {
+    border-color: #72bd82;
+    background: #192e20;
+    color: #d8f0df;
+  }
+  :global([data-theme='dark']) .course-notice--addition .course-notice__title {
+    color: #9cdda9;
+  }
+</style>
