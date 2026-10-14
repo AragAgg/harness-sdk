@@ -1,5 +1,5 @@
 ---
-title: "Lesson 9: Persistent Memory with Session Managers"
+title: "Lesson 9: Persistent memory with session managers"
 description: "Without persistence, every conversation starts from zero. The agent has no memory of prior interactions, no accumulated knowledge about the user, no awareness of decisions made yesterday. Session managers handle the storage and retrieval of conversation state so continuity works automatically."
 redirectFrom:
   - docs/community/learning/lesson9-persistent-memory-with-session-managers
@@ -15,16 +15,16 @@ notices below.
 
 </CourseNotice>
 
-<YouTube id="HqGIYRXo6WE" title="Lesson 9: Persistent Memory with Session Managers" />
+<YouTube id="HqGIYRXo6WE" title="Lesson 9: Persistent memory with session managers" />
 *[Watch on YouTube](https://www.youtube.com/watch?v=HqGIYRXo6WE&list=PLDzwjhH-4yhU&index=9)*
 
 *Code for this lesson: [`samples/09-persistent-memory`](https://github.com/aws-samples/sample-building-with-strands-course/tree/main/samples/09-persistent-memory)*
 
-## Persisting Conversation History
+## Persisting conversation history
 
 Session managers persist conversation history and agent state across runs. Without them, everything resets when the process stops. They're implemented as hook providers, so persistence is just another harness behavior layered in through hooks.
 
-## File Session Manager (Record-Based)
+## File session manager (record-based)
 
 Run these examples from `samples/09-persistent-memory`.
 
@@ -32,10 +32,11 @@ The record-based approach persists each message individually. It's still support
 
 ```python
 from strands import Agent
+from strands.session.file_session_manager import FileSessionManager
+
 from customer_service_tools import lookup_customer, get_order_history, process_refund
 
 SYSTEM_PROMPT = "Help customers with their orders using the available tools."
-from strands.session.file_session_manager import FileSessionManager
 
 session_manager = FileSessionManager(
     session_id="customer-session-001",
@@ -52,7 +53,7 @@ agent = Agent(
 
 📂 [file_session_manager.py](https://github.com/aws-samples/sample-building-with-strands-course/tree/main/samples/09-persistent-memory/file_session_manager.py)
 
-## S3 Session Manager (Record-Based)
+## S3 session manager (record-based)
 
 Same record-based approach, backed by S3 instead of local disk:
 
@@ -72,7 +73,7 @@ agent = Agent(session_manager=session_manager)
 
 📂 [s3_session_manager.py](https://github.com/aws-samples/sample-building-with-strands-course/tree/main/samples/09-persistent-memory/s3_session_manager.py)
 
-## Snapshot Session Manager
+## Snapshot session manager
 
 <CourseNotice title="" variant="addition">
 
@@ -89,11 +90,12 @@ message as a separate record.
 
 ```python
 from strands import Agent
+from strands.session import SnapshotSessionManager
+from strands.storage import LocalFileStorage
+
 from customer_service_tools import lookup_customer, get_order_history, process_refund
 
 SYSTEM_PROMPT = "Help customers with their orders using the available tools."
-from strands.session import SnapshotSessionManager
-from strands.storage import LocalFileStorage
 
 session_manager = SnapshotSessionManager(
     session_id="customer-session-001",
@@ -123,7 +125,7 @@ session_manager = SnapshotSessionManager(
 
 📂 [snapshot_session_manager.py](https://github.com/aws-samples/sample-building-with-strands-course/tree/main/samples/09-persistent-memory/snapshot_session_manager.py)
 
-## When to Use Which
+## When to use which
 
 | Manager | Best For |
 |---|---|
@@ -131,7 +133,7 @@ session_manager = SnapshotSessionManager(
 | `FileSessionManager` | Existing record-based sessions; retains their storage format. |
 | `S3SessionManager` | Same as File but with S3 for cross-machine access. |
 
-## Sessions, Memory, and Storage
+## Sessions, memory, and storage
 
 <CourseNotice title="" variant="addition">
 
@@ -167,7 +169,7 @@ agent = Agent(
 )
 ```
 
-## Production Storage: DynamoDB
+## Production storage: DynamoDB
 
 Because sessions, memory, and offloaded context all sit on the `Storage` interface, one production backend can serve all of them. [Strands DynamoDB Storage](https://github.com/aws/strands-dynamodb-storage) is an AWS-maintained backend that fits agent workloads well: serverless, single-digit-millisecond reads, native TTL so stale sessions expire themselves, and vector search on the same table for semantic memory.
 
@@ -193,7 +195,7 @@ agent = Agent(
 You own the table (a string `pk` partition key and string `sk` sort key is all it needs), for basic byte storage. Optional S3 offload and vector search need additional resources
 and permissions; see the backend's setup instructions.
 
-## More Backends
+## More backends
 
 The integrations catalog lists additional session managers, memory stores, and storage backends. They implement the same interfaces, so you can swap them in without changing agent code.
 

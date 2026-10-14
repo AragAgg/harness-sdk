@@ -1,5 +1,5 @@
 ---
-title: "Lesson 6: Agent Plugins & Skills"
+title: "Lesson 6: Agent plugins & skills"
 description: "Individual tools solve individual problems. But some capabilities require multiple tools working together with specific hooks and prompt instructions to function correctly. That's what a plugin is: a packaged bundle of tools + hooks + system prompt additions that you attach to an agent as a unit."
 redirectFrom:
   - docs/community/learning/lesson6-agent-plugins-and-skills
@@ -15,7 +15,7 @@ notices below.
 
 </CourseNotice>
 
-<YouTube id="dnChw1mfc5M" title="Lesson 6: Agent Plugins &amp; Skills" />
+<YouTube id="dnChw1mfc5M" title="Lesson 6: Agent plugins &amp; skills" />
 *[Watch on YouTube](https://www.youtube.com/watch?v=dnChw1mfc5M&list=PLDzwjhH-4yhU&index=6)*
 
 *Code for this lesson: [`samples/06-plugins-skills`](https://github.com/aws-samples/sample-building-with-strands-course/tree/main/samples/06-plugins-skills)*
@@ -54,7 +54,7 @@ agent = Agent(
 
 The `skills/` directory in the sample has four skills: `account-troubleshooting`, `order-tracking`, `pdf-processing`, and `refund-processing`. Each is a folder with a `SKILL.md` describing when to use it and the steps to follow. This customer service agent is the running example for the rest of the course.
 
-## Goal Loop
+## Goal loop
 
 Lesson 1 said a good harness verifies whether the agent's actions actually worked. `GoalLoop` is the plugin that does that. You define what "done" means, attach it to the agent, and it handles the retry loop:
 

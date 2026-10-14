@@ -1,5 +1,5 @@
 ---
-title: "Lesson 11: Multi-Agent Patterns: Graph Workflows"
+title: "Lesson 11: Multi-agent patterns: graph workflows"
 description: "Some workflows have a fixed structure: step A feeds into step B, step B branches based on a condition, both branches converge at step C. You don't want the model deciding whether to run step B. You want it guaranteed."
 redirectFrom:
   - docs/community/learning/lesson11-multi-agent-patterns-graph-workflows
@@ -15,12 +15,12 @@ notices below.
 
 </CourseNotice>
 
-<YouTube id="jDeV2V5fJUQ" title="Lesson 11: Multi-Agent Patterns: Graph Workflows" />
+<YouTube id="jDeV2V5fJUQ" title="Lesson 11: Multi-agent patterns: graph workflows" />
 *[Watch on YouTube](https://www.youtube.com/watch?v=jDeV2V5fJUQ&list=PLDzwjhH-4yhU&index=11)*
 
 *Code for this lesson: [`samples/11-graphs`](https://github.com/aws-samples/sample-building-with-strands-course/tree/main/samples/11-graphs)*
 
-## Deterministic Control Over Execution
+## Deterministic control over execution
 
 Graphs and workflows give you deterministic control over multi-agent execution. Unlike agents-as-tools, where the orchestrator decides the flow dynamically, these patterns let you define the exact execution order, dependencies, and parallel paths upfront. Use them when you can draw the workflow on a whiteboard.
 
@@ -35,8 +35,6 @@ the current import below when running the graph example.
 </CourseNotice>
 
 Each node is a full agent; edges express dependencies. A node executes when all its incoming edges are satisfied, and the graph resolves what runs in parallel and what waits.
-
-Install web fetching support with `pip install "strands-agents[web-fetch]"`.
 
 ```python
 from strands import Agent
@@ -87,7 +85,7 @@ Data flow: entry nodes receive the original task. Downstream nodes receive the o
 
 Common shapes: sequential pipelines, parallel fan-out (as above), conditional branching, and cyclic feedback loops. If you build a cycle, set `set_max_node_executions` so it can't loop forever.
 
-## Key Concepts
+## Key concepts
 
 - **Nodes** are agents, other multi-agent systems, or `MultiAgentNode` implementations. They execute when all incoming edges are satisfied.
 - **Edges** define dependencies. An edge from A to B means B waits for A.

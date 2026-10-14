@@ -1,5 +1,5 @@
 ---
-title: "Lesson 13: Evaluating Agents"
+title: "Lesson 13: Evaluating agents"
 description: "Agent evaluation is harder than traditional software testing. The output is non-deterministic."
 redirectFrom:
   - docs/community/learning/lesson13-evaluating-agents
@@ -15,12 +15,12 @@ notices below.
 
 </CourseNotice>
 
-<YouTube id="rDtcfG4aZV4" title="Lesson 13: Evaluating Agents" />
+<YouTube id="rDtcfG4aZV4" title="Lesson 13: Evaluating agents" />
 *[Watch on YouTube](https://www.youtube.com/watch?v=rDtcfG4aZV4&list=PLDzwjhH-4yhU&index=13)*
 
 *Code for this lesson: [`samples/13-evals`](https://github.com/aws-samples/sample-building-with-strands-course/tree/main/samples/13-evals)*
 
-## Why Traditional Testing Breaks Down
+## Why traditional testing breaks down
 
 Agents are nondeterministic. The same input can produce a different (but equally valid) response, a different tool ordering, or a different level of detail. `assert output == expected` doesn't work. Instead you need LLM-as-a-judge scoring, trajectory validation, multi-turn simulations, and deterministic assertions, combined into eval suites that catch regressions.
 
@@ -30,7 +30,7 @@ Strands Evals is a separate package:
 pip install strands-agents-evals
 ```
 
-## Basic Evaluation Structure
+## Basic evaluation structure
 
 An evaluation has three parts: **cases** (inputs plus expectations), **evaluators** (how to score), and a **task** function that runs your agent and returns what the evaluators need. Here we evaluate the customer service agent from earlier lessons on both its final output and the sequence of tools it called:
 
@@ -91,7 +91,7 @@ report.run_display()
 
 📂 [customer_service_eval.py](https://github.com/aws-samples/sample-building-with-strands-course/tree/main/samples/13-evals/customer_service_eval.py)
 
-## Evaluation Types
+## Evaluation types
 
 | Type | What It Checks |
 | --- | --- |
@@ -103,7 +103,7 @@ report.run_display()
 | **Red teaming** | Does the agent resist adversarial attacks? |
 | **Experiment Generator** | Auto-bootstraps test cases from agent capabilities |
 
-## Chaos Testing
+## Chaos testing
 
 Production isn't ideal. Tools time out, APIs go down, responses come back truncated. Chaos testing verifies your agent handles those failures gracefully. The `ChaosPlugin` intercepts tool calls and injects configurable failures.
 
@@ -150,7 +150,7 @@ report.run_display()
 
 Does the agent recover when `get_order_history` times out? When `get_order_history` returns a network error? Chaos testing lets you find out while you build, not after customers do.
 
-## Red Teaming
+## Red teaming
 
 Red teaming tests whether your agent resists adversarial pressure: jailbreaks, data exfiltration attempts, excessive agency. The generator inspects your agent's tools and system prompt and produces targeted attacks; the strategy controls how those attacks escalate across turns.
 
@@ -178,7 +178,7 @@ report = experiment.run_evaluations()
 Red teaming probes the tested guardrails under adversarial conditions. Passing these
 cases does not prove resistance to every attack.
 
-## Best Practices
+## Best practices
 
 - Evaluate multi-turn interactions, not just single turns
 - Combine LLM judges with deterministic assertions

@@ -1,5 +1,5 @@
 ---
-title: "Lesson 4: Adding Callbacks & Response Streaming"
+title: "Lesson 4: Adding callbacks & response streaming"
 description: "This chapter is about making the agent's work visible while it's happening, not just dumping a final answer after 15 seconds of silence."
 redirectFrom:
   - docs/community/learning/lesson4-adding-callbacks-and-response-streaming
@@ -15,16 +15,16 @@ notices below.
 
 </CourseNotice>
 
-<YouTube id="PtdHZBbm1Ys" title="Lesson 4: Adding Callbacks &amp; Response Streaming" />
+<YouTube id="PtdHZBbm1Ys" title="Lesson 4: Adding callbacks &amp; response streaming" />
 *[Watch on YouTube](https://www.youtube.com/watch?v=PtdHZBbm1Ys&list=PLDzwjhH-4yhU&index=4)*
 
 *Code for this lesson: [`samples/04-callbacks-streaming`](https://github.com/aws-samples/sample-building-with-strands-course/tree/main/samples/04-callbacks-streaming)*
 
-## Callbacks Control What the User Sees
+## Callbacks control what the user sees
 
 Callbacks control how agent output surfaces to users. The default handler streams text to stdout, which is fine for a terminal demo but not for a UI, an API, or a sub-agent running behind the scenes. You can replace the default with a custom handler, silence output entirely, or use `stream_async()` for async servers.
 
-## Custom Callback Handler
+## Custom callback handler
 
 <CourseNotice>
 
@@ -82,7 +82,7 @@ Useful event keys you'll see in `kwargs`:
 - `current_tool_use`: the tool the model is invoking, including its input
 - `message`: a complete message once a turn finishes
 
-## Silent Mode
+## Silent mode
 
 Set `callback_handler=None` to suppress all output. The agent runs and returns a result you can use programmatically:
 
@@ -94,7 +94,7 @@ print(f"Captured result: {result}")
 
 This is essential for sub-agents in multi-agent systems that run behind the scenes. Only the orchestrator should be streaming to the user.
 
-## Async Streaming (FastAPI)
+## Async streaming (FastAPI)
 
 For async servers, use `agent.stream_async()`, an async generator that yields events as they happen. Here it powers a FastAPI streaming endpoint:
 

@@ -1,5 +1,5 @@
 ---
-title: "Lesson 14: Deploying Agents to the Cloud"
+title: "Lesson 14: Deploying agents to the cloud"
 description: "We'll deploy an agent to AWS using Amazon Bedrock AgentCore. AgentCore is a collection of components for building, deploying and operating agents in production. The main components we will focus on in this video is AgentCore Runtime and AgentCore Memory."
 redirectFrom:
   - docs/community/learning/lesson14-deploying-agents-to-the-cloud
@@ -15,18 +15,18 @@ notices below.
 
 </CourseNotice>
 
-<YouTube id="S_ZRZFDJ6wE" title="Lesson 14: Deploying Agents to the Cloud" />
+<YouTube id="S_ZRZFDJ6wE" title="Lesson 14: Deploying agents to the cloud" />
 *[Watch on YouTube](https://www.youtube.com/watch?v=S_ZRZFDJ6wE&list=PLDzwjhH-4yhU&index=14)*
 
 *Code for this lesson: [`samples/14-deploy`](https://github.com/aws-samples/sample-building-with-strands-course/tree/main/samples/14-deploy)*
 
-## From Local to Production
+## From local to production
 
 Everything so far has run on a local machine. A Strands agent is just Python, so you can containerize it and run it anywhere. This lesson deploys it to AWS using Amazon Bedrock AgentCore: Runtime for isolated execution, Memory for persistent and long-term recall, and Observability for tracing.
 
 ![AgentCore Overview](../assets/learning/agentcore-overview.png)
 
-## Making Your Agent Deployable
+## Making your agent deployable
 
 Run this excerpt from `samples/14-deploy`. The linked `main.py` contains the complete
 entrypoint, request parsing, and runtime session handling.
@@ -93,7 +93,7 @@ authenticated identity. Durable recall requires the configured memory resource.
 
 The `retrieval_config` namespaces tell AgentCore Memory which long-term memory strategies to pull from on each turn, so the agent recalls facts and preferences about a returning user without replaying old conversations.
 
-## Deployment Commands
+## Deployment commands
 
 ```bash
 # From samples/14-deploy, install the CLI and create a Python Strands project.
@@ -116,7 +116,7 @@ agentcore invoke --session-id "$SESSION_ID" \
   '{"prompt": "I need help returning my order", "actor_id": "customer-demo"}'
 ```
 
-## What AgentCore Provides
+## What AgentCore provides
 
 | Component | What It Does |
 | --- | --- |
@@ -128,7 +128,7 @@ agentcore invoke --session-id "$SESSION_ID" \
 
 AgentCore has more capabilities beyond these. See the [AgentCore developer guide](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/what-is-bedrock-agentcore.html) for the full picture.
 
-## What You Still Need
+## What you still need
 
 The deployed agent is only part of a production architecture. You still need API gateways, rate limiting, retries, security controls, monitoring, and error handling around it. The surrounding architecture matters as much as the agent.
 
