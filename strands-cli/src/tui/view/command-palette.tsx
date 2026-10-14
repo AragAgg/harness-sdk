@@ -3,6 +3,7 @@ import type { DOMElement } from 'ink'
 import stringWidth from 'string-width'
 
 import type { CommandAssistance, LocalCommandSpec } from '../chat/commands.js'
+import { trailingWindowStart } from './interaction.js'
 import { PanelItemHeader } from './panel-components.js'
 import { Box, Text, useTheme } from './theme.js'
 
@@ -26,7 +27,7 @@ export function CommandPalette({
   onRowElement?: (index: number, element: DOMElement | null) => void
 }): ReactElement {
   const theme = useTheme()
-  const start = Math.max(0, Math.min(selected - capacity + 1, commands.length - capacity))
+  const start = trailingWindowStart(selected, capacity, commands.length)
   const usageWidth = Math.max(
     1,
     Math.min(Math.max(0, ...commands.map((command) => stringWidth(command.usage))) + 2, Math.floor((width - 3) / 2))
