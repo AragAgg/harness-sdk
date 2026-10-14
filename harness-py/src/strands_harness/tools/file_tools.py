@@ -21,10 +21,15 @@ _READ_DEFAULT_LIMIT = 2000
 _IMAGE_FORMATS = {"png": "png", "jpg": "jpeg", "jpeg": "jpeg", "gif": "gif", "webp": "webp"}
 _DOCUMENT_FORMATS = ("pdf", "doc", "docx", "xls", "xlsx")
 
+# Absolute on POSIX (``/…``) or Windows (``C:\…``, ``C:/…``, ``\\server\share\…``).
+_ABSOLUTE_PATH = re.compile(r"^(?:/|\\\\|[A-Za-z]:[\\/])")
+
 
 def _validate_path(path: str) -> None:
-    if not path.startswith("/"):
-        raise ValueError(f"The path {path} is not absolute; it should start with '/'.")
+    if not _ABSOLUTE_PATH.match(path):
+        raise ValueError(
+            f"The path {path} is not absolute; it should start with '/' (or a drive letter or UNC share on Windows)."
+        )
     if ".." in re.split(r"[/\\]", path):
         raise ValueError("Invalid path: path traversal is not allowed.")
 

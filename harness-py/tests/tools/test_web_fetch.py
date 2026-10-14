@@ -1,9 +1,10 @@
 import re
-import shlex
 import shutil
+import tempfile
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, HTTPServer
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -30,17 +31,19 @@ class _Sandbox:
         self.body = body
         self.result = ExecutionResult(exit_code=exit_code, stdout=f"{content_type}\n{url}\n", stderr=stderr)
         self.commands = []
+        self.removed = []
         self.files = {}
 
     async def execute(self, command, **kwargs):
         self.commands.append(command)
-        if command.startswith("rm -f "):
-            for path in shlex.split(command)[2:]:
-                self.files.pop(path, None)
-            return ExecutionResult(exit_code=0, stdout="", stderr="")
         if self.result.exit_code == 0:
             self.files[re.search(r"-o (\S+)", command).group(1).strip("'")] = self.body
         return self.result
+
+    async def remove_file(self, path):
+        self.removed.append(path)
+        if self.files.pop(path, None) is None:
+            raise FileNotFoundError(path)
 
     async def read_file(self, path):
         return self.files[path]
@@ -193,7 +196,7 @@ async def test_fetch_text_runs_curl_in_the_sandbox_and_reads_the_final_hop():
     ):
         assert flag in command
     # The body file is removed afterwards.
-    assert sandbox.commands[-1].startswith("rm -f ") and sandbox.files == {}
+    assert len(sandbox.removed) == 2 and sandbox.files == {}
 
 
 async def test_fetch_text_handles_a_missing_content_type():
@@ -204,9 +207,27 @@ async def test_fetch_text_handles_a_missing_content_type():
 
 
 async def test_fetch_text_truncates_the_body_in_the_sandbox():
-    command = web_fetch_module._curl_command("https://example.com", "/tmp/f")
+    command = web_fetch_module._curl_command("https://example.com", "/tmp/f", "sh")
     assert f"&& head -c {web_fetch_module._MAX_BYTES} /tmp/f > /tmp/f.part && mv -f /tmp/f.part /tmp/f" in command
     assert "--max-filesize" not in command
+
+
+async def test_fetch_text_uses_native_curl_and_truncation_for_powershell():
+    sandbox = _Sandbox(body=b"body", content_type="text/plain")
+    sandbox.environment = {
+        "platform": "Windows",
+        "cwd": "C:\\work",
+        "shell": "PowerShell",
+        "temp_dir": "C:\\Temp",
+    }
+    await web_fetch_module._fetch_text(sandbox, "https://example.com/it's", "curl")
+    command = sandbox.commands[0]
+    assert command.startswith("curl.exe ")
+    assert "head -c" not in command
+    assert "'https://example.com/it''s'" in command
+    assert "if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }" in command
+    assert f"SetLength([Math]::Min($file.Length, {web_fetch_module._MAX_BYTES}))" in command
+    assert sandbox.removed[0].startswith("C:\\Temp\\strands-web-fetch-")
 
 
 async def test_fetch_text_keeps_non_html_verbatim():
@@ -231,7 +252,7 @@ async def test_fetch_text_surfaces_curl_errors_and_still_cleans_up():
     sandbox = _Sandbox(stderr="curl: (22) The requested URL returned error: 404\n", exit_code=22)
     with pytest.raises(RuntimeError, match=r"\(22\).*404"):
         await web_fetch_module._fetch_text(sandbox, "https://example.com/missing", "curl")
-    assert sandbox.commands[-1].startswith("rm -f ")
+    assert len(sandbox.removed) == 2
 
 
 @pytest.mark.skipif(shutil.which("curl") is None, reason="curl not installed")
@@ -285,7 +306,7 @@ async def test_fetch_text_end_to_end_through_the_local_environment():
         _, huge = await web_fetch_module._fetch_text(sandbox, f"{base}/huge", "curl")
         assert huge == "x" * web_fetch_module._MAX_CHARS
         assert await web_fetch_module._fetch_text(sandbox, f"{base}/notype", "curl") == (f"{base}/notype", "a < b")
-        assert (await sandbox.execute("ls /tmp | grep -c strands-web-fetch")).stdout.strip() == "0"
+        assert not list(Path(tempfile.gettempdir()).glob("strands-web-fetch-*"))
         with pytest.raises(RuntimeError, match="404"):
             await web_fetch_module._fetch_text(sandbox, f"{base}/missing", "curl")
     finally:

@@ -114,6 +114,22 @@ describe('read/write/edit', () => {
   it('rejects path traversal', async () => {
     await expect(read.invoke({ path: '/tmp/../etc/passwd' }, ctx())).rejects.toThrow('path traversal')
   })
+
+  it('accepts Windows drive-letter and UNC paths', async () => {
+    const written: string[] = []
+    const sandbox = { writeText: async (path: string) => void written.push(path) }
+    const windowsContext = { agent: { sandbox } } as unknown as ToolContext
+    await write.invoke({ path: 'C:\\Users\\me\\novel.json', content: '{}' }, windowsContext)
+    await write.invoke({ path: 'C:/Users/me/novel.json', content: '{}' }, windowsContext)
+    await write.invoke({ path: '\\\\server\\share\\novel.json', content: '{}' }, windowsContext)
+    expect(written).toEqual(['C:\\Users\\me\\novel.json', 'C:/Users/me/novel.json', '\\\\server\\share\\novel.json'])
+    await expect(write.invoke({ path: '\\Users\\me\\novel.json', content: '' }, windowsContext)).rejects.toThrow(
+      'not absolute'
+    )
+    await expect(write.invoke({ path: 'C:\\Users\\..\\secret', content: '' }, windowsContext)).rejects.toThrow(
+      'path traversal'
+    )
+  })
 })
 
 describe('read media capability', () => {

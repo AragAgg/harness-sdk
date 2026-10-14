@@ -8,8 +8,10 @@ from .event_loop._retry import ModelRetryStrategy
 from .interventions import InterventionHandler
 from .plugins import MultiAgentPlugin, Plugin
 from .sandbox import (
+    NotASandboxLocalEnvironment,
     PosixShellSandbox,
     Sandbox,
+    SandboxEnvironment,
 )
 from .sandbox.errors import SandboxPathNotFoundError, SandboxTimeoutError
 from .tools.decorator import tool
@@ -29,9 +31,11 @@ __all__ = [
     "models",
     "ModelRetryStrategy",
     "MultiAgentPlugin",
+    "NotASandboxLocalEnvironment",
     "Plugin",
     "PosixShellSandbox",
     "Sandbox",
+    "SandboxEnvironment",
     "SandboxPathNotFoundError",
     "SandboxTimeoutError",
     "Skill",

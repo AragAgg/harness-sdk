@@ -8,10 +8,19 @@ are replaced by ``isinstance`` checks, the Pythonic way to discriminate a union)
 """
 
 from dataclasses import dataclass, field
-from typing import Literal
+from typing import Literal, TypedDict
 
 StreamType = Literal["stdout", "stderr"]
 """Type of a streaming output chunk — distinguishes stdout from stderr."""
+
+
+class SandboxEnvironment(TypedDict, total=False):
+    """Runtime metadata reported by a sandbox that knows its own environment."""
+
+    platform: str
+    cwd: str
+    shell: str
+    temp_dir: str
 
 
 @dataclass

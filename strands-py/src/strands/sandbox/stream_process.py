@@ -12,9 +12,12 @@ is wall-clock: measured from spawn and not reset by ongoing output.
 """
 
 import asyncio
+import codecs
 import contextlib
 import os
+import platform
 import signal
+import subprocess
 from collections.abc import AsyncGenerator
 
 from .errors import SandboxTimeoutError
@@ -27,11 +30,29 @@ _SIGNAL_EXIT_BASE = 128
 # tree can be killed at once. Without this, "sh -c 'cmd; sleep 60'" leaves the
 # sleep child holding the pipe write-end open after the parent dies, so the
 # readers never see EOF and the generator hangs.
-_USE_PROCESS_GROUP = hasattr(os, "killpg")
+_IS_WINDOWS = platform.system() == "Windows"
+_USE_PROCESS_GROUP = not _IS_WINDOWS and hasattr(os, "killpg")
+_WINDOWS_PROCESS_GROUP = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
 
 
-def _kill_tree(proc: asyncio.subprocess.Process) -> None:
+async def _kill_tree(proc: asyncio.subprocess.Process) -> None:
     """SIGKILL the entire process tree (the group on POSIX, the lone process elsewhere)."""
+    if _IS_WINDOWS:
+        with contextlib.suppress(OSError):
+            killer = await asyncio.create_subprocess_exec(
+                "taskkill",
+                "/PID",
+                str(proc.pid),
+                "/T",
+                "/F",
+                stdout=asyncio.subprocess.DEVNULL,
+                stderr=asyncio.subprocess.DEVNULL,
+            )
+            await killer.wait()
+        if proc.returncode is None:
+            with contextlib.suppress(ProcessLookupError, PermissionError):
+                proc.kill()
+        return
     with contextlib.suppress(ProcessLookupError, PermissionError):
         if _USE_PROCESS_GROUP:
             os.killpg(proc.pid, signal.SIGKILL)
@@ -45,6 +66,9 @@ async def _stream_process(
     *,
     timeout: float | None = None,
     enoent_message: str | None = None,
+    cwd: str | None = None,
+    env: dict[str, str] | None = None,
+    input_data: bytes | None = None,
 ) -> AsyncGenerator[StreamChunk | ExecutionResult, None]:
     """Spawn a command and stream its stdout/stderr, yielding the final result.
 
@@ -60,6 +84,9 @@ async def _stream_process(
         enoent_message: Message to surface as ``stderr`` (with exit code 127)
             when ``program`` is not on PATH. If ``None``, the underlying
             :class:`FileNotFoundError` propagates instead.
+        cwd: Working directory for the process.
+        env: Environment variables added to the current process environment.
+        input_data: Bytes written to the process's standard input.
 
     Yields:
         :class:`StreamChunk` objects for output, then a final
@@ -73,9 +100,13 @@ async def _stream_process(
         proc = await asyncio.create_subprocess_exec(
             program,
             *args,
+            stdin=asyncio.subprocess.PIPE if input_data is not None else asyncio.subprocess.DEVNULL,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             start_new_session=_USE_PROCESS_GROUP,
+            creationflags=_WINDOWS_PROCESS_GROUP if _IS_WINDOWS else 0,
+            cwd=cwd,
+            env={**os.environ, **env} if env else None,
         )
     except FileNotFoundError:
         if enoent_message is None:
@@ -89,13 +120,28 @@ async def _stream_process(
     timed_out = False
 
     async def pump(stream: asyncio.StreamReader, stream_type: StreamType, buf: list[str]) -> None:
+        decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
         while data := await stream.read(_READ_CHUNK_SIZE):
-            text = data.decode(errors="replace")
+            text = decoder.decode(data)
+            if not text:
+                continue
             buf.append(text)
             await queue.put(StreamChunk(data=text, stream_type=stream_type))
+        tail = decoder.decode(b"", final=True)
+        if tail:
+            buf.append(tail)
+            await queue.put(StreamChunk(data=tail, stream_type=stream_type))
 
     assert proc.stdout is not None and proc.stderr is not None
     pumps = asyncio.gather(pump(proc.stdout, "stdout", out_buf), pump(proc.stderr, "stderr", err_buf))
+
+    async def feed_stdin() -> None:
+        if input_data is None or proc.stdin is None:
+            return
+        proc.stdin.write(input_data)
+        await proc.stdin.drain()
+        proc.stdin.close()
+        await proc.stdin.wait_closed()
 
     async def reader() -> None:
         await pumps
@@ -107,10 +153,10 @@ async def _stream_process(
         await asyncio.sleep(timeout)
         if proc.returncode is None:
             timed_out = True
-            _kill_tree(proc)
+            await _kill_tree(proc)
             await queue.put(None)  # signal the consumer loop to stop
 
-    tasks = [asyncio.ensure_future(reader())]
+    tasks = [asyncio.ensure_future(reader()), asyncio.ensure_future(feed_stdin())]
     if timeout is not None:
         tasks.append(asyncio.ensure_future(enforce_timeout(timeout)))
 
@@ -126,7 +172,7 @@ async def _stream_process(
         yield ExecutionResult(exit_code=exit_code, stdout="".join(out_buf), stderr="".join(err_buf))
     finally:
         if proc.returncode is None:
-            _kill_tree(proc)
+            await _kill_tree(proc)
         pumps.cancel()
         for task in tasks:
             task.cancel()

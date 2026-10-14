@@ -196,6 +196,12 @@
       "types": "./dist/src/sandbox/index.d.ts",
       "default": "./dist/src/sandbox/index.js"
     },
+    "./sandbox/local": {
+      "node": {
+        "types": "./dist/src/sandbox/not-a-sandbox-local-environment.d.ts",
+        "default": "./dist/src/sandbox/not-a-sandbox-local-environment.js"
+      }
+    },
     "./sandbox/docker": {
       "types": "./dist/src/sandbox/docker.d.ts",
       "default": "./dist/src/sandbox/docker.js"

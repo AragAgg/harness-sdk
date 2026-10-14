@@ -2,7 +2,8 @@
  * Spawn a process and stream its stdout/stderr as an async generator.
  */
 
-import { spawn } from 'child_process'
+import { spawn, spawnSync } from 'child_process'
+import { StringDecoder } from 'string_decoder'
 import { SandboxAbortError, SandboxTimeoutError } from './errors.js'
 import type { ExecutionResult, StreamChunk } from './types.js'
 
@@ -27,6 +28,12 @@ export interface StreamProcessOptions {
   signal?: AbortSignal | undefined
   /** Custom error message when the spawned binary is not found (ENOENT). */
   enoentMessage?: string | undefined
+  /** Working directory for the process. */
+  cwd?: string | undefined
+  /** Environment variables added to the current process environment. */
+  env?: Record<string, string> | undefined
+  /** Bytes or text written to the process's standard input. */
+  input?: Uint8Array | string | undefined
 }
 
 /**
@@ -49,12 +56,15 @@ export async function* streamProcess(
   args: string[],
   options?: StreamProcessOptions
 ): AsyncGenerator<StreamChunk | ExecutionResult, void, undefined> {
-  const proc = spawn(command, args)
-  // Decode with a StringDecoder that holds partial multibyte bytes across chunk
-  // boundaries, so a UTF-8 sequence split across two pipe reads is not decoded
-  // as two invalid halves.
-  proc.stdout?.setEncoding('utf8')
-  proc.stderr?.setEncoding('utf8')
+  const proc = spawn(command, args, {
+    cwd: options?.cwd,
+    env: options?.env ? { ...process.env, ...options.env } : undefined,
+    stdio: [options?.input === undefined ? 'ignore' : 'pipe', 'pipe', 'pipe'],
+    detached: process.platform !== 'win32',
+    windowsHide: true,
+  })
+  const stdoutDecoder = new StringDecoder('utf8')
+  const stderrDecoder = new StringDecoder('utf8')
   const chunks: StreamChunk[] = []
   let stdout = ''
   let stderr = ''
@@ -78,26 +88,28 @@ export async function* streamProcess(
     if (terminating || done) return
     terminating = true
     error = reason
-    proc.kill('SIGTERM')
+    signalProcessTree(proc.pid, 'SIGTERM')
     wake()
     killTimer = setTimeout(() => {
-      if (!done) proc.kill('SIGKILL')
+      if (!done) signalProcessTree(proc.pid, 'SIGKILL')
     }, 1000)
   }
 
-  proc.stdout?.on('data', (data) => {
-    const text = String(data)
-    stdout += text
-    chunks.push({ type: 'streamChunk', data: text, streamType: 'stdout' })
+  const appendOutput = (text: string, streamType: 'stdout' | 'stderr'): void => {
+    if (!text) return
+    if (streamType === 'stdout') {
+      stdout += text
+    } else {
+      stderr += text
+    }
+    chunks.push({ type: 'streamChunk', data: text, streamType })
     wake()
-  })
+  }
 
-  proc.stderr?.on('data', (data) => {
-    const text = String(data)
-    stderr += text
-    chunks.push({ type: 'streamChunk', data: text, streamType: 'stderr' })
-    wake()
-  })
+  proc.stdout?.on('data', (data: Uint8Array) => appendOutput(stdoutDecoder.write(data), 'stdout'))
+  proc.stderr?.on('data', (data: Uint8Array) => appendOutput(stderrDecoder.write(data), 'stderr'))
+  proc.stdout?.on('end', () => appendOutput(stdoutDecoder.end(), 'stdout'))
+  proc.stderr?.on('end', () => appendOutput(stderrDecoder.end(), 'stderr'))
 
   proc.on('close', (code, signal) => {
     if (!done) {
@@ -125,6 +137,11 @@ export async function* streamProcess(
     }
   })
 
+  if (options?.input !== undefined) {
+    proc.stdin?.on('error', () => {})
+    proc.stdin?.end(options.input)
+  }
+
   const onAbort = (): void => terminate(new SandboxAbortError())
 
   if (options?.signal) {
@@ -150,7 +167,7 @@ export async function* streamProcess(
         }
       }
 
-      if (done || terminating) break
+      if (done) break
 
       await new Promise<void>((resolve) => {
         resolveWait = resolve
@@ -182,6 +199,23 @@ export async function* streamProcess(
     if (timeoutHandle !== undefined) clearTimeout(timeoutHandle)
     if (killTimer !== undefined) clearTimeout(killTimer)
     if (options?.signal) options.signal.removeEventListener('abort', onAbort)
-    if (!done) proc.kill()
+    if (!done) signalProcessTree(proc.pid, 'SIGKILL')
+  }
+}
+
+function signalProcessTree(pid: number | undefined, signal: 'SIGTERM' | 'SIGKILL'): void {
+  if (pid === undefined) return
+  if (process.platform === 'win32') {
+    spawnSync('taskkill', ['/PID', String(pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' })
+    return
+  }
+  try {
+    process.kill(-pid, signal)
+  } catch {
+    try {
+      process.kill(pid, signal)
+    } catch {
+      // The process may have completed between the state check and the signal.
+    }
   }
 }

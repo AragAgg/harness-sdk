@@ -28,7 +28,7 @@ from collections.abc import AsyncGenerator
 from typing import Any
 
 from ..types.tools import AgentTool
-from .types import ExecutionResult, FileInfo, StreamChunk
+from .types import ExecutionResult, FileInfo, SandboxEnvironment, StreamChunk
 
 logger = logging.getLogger(__name__)
 
@@ -63,6 +63,8 @@ class Sandbox(ABC):
                 elif isinstance(chunk, ExecutionResult):
                     print(f"Exit code: {chunk.exit_code}")
     """
+
+    environment: SandboxEnvironment | None = None
 
     # ---- Streaming methods (abstract primitives) ----
 

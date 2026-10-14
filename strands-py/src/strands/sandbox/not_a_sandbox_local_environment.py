@@ -7,15 +7,13 @@ this is the fallback an :class:`~strands.agent.agent.Agent` uses when no sandbox
 is passed, not a security boundary.
 
 Mirroring the TypeScript oracle, this extends :class:`~strands.sandbox.base.Sandbox`
-directly: file operations use **native** :mod:`pathlib`/:mod:`os` calls (avoiding a
-shell and reporting real ``size`` metadata), while command and code execution spawn a
-local ``sh``.
+directly: file operations use **native** :mod:`pathlib`/:mod:`os` calls, commands
+use the host's native shell, and code runs through the selected interpreter.
 """
 
-import base64
 import os
-import shlex
-import uuid
+import platform
+import tempfile
 from collections.abc import AsyncGenerator
 from pathlib import Path
 from typing import Any
@@ -23,17 +21,19 @@ from typing import Any
 from .base import Sandbox
 from .constants import LANGUAGE_PATTERN
 from .errors import SandboxPathNotFoundError
-from .posix_shell import build_shell_env_prefix
+from .posix_shell import validate_env_keys
 from .stream_process import _stream_process
-from .types import ExecutionResult, FileInfo, StreamChunk
+from .types import ExecutionResult, FileInfo, SandboxEnvironment, StreamChunk
+
+_IS_WINDOWS = platform.system() == "Windows"
 
 
 class NotASandboxLocalEnvironment(Sandbox):
     """Run commands, code, and file operations on the host with no isolation.
 
     Used as the default execution environment when an :class:`Agent` is created
-    without a ``sandbox``. Command and code execution spawn a local ``sh``; file
-    operations use the host filesystem directly.
+    without a ``sandbox``. Commands use ``sh`` on POSIX and PowerShell on Windows;
+    code and file operations do not pass through a shell.
 
     .. warning::
         This provides **no isolation**. Commands run with the full privileges of
@@ -41,10 +41,24 @@ class NotASandboxLocalEnvironment(Sandbox):
         :class:`~strands.sandbox.docker.DockerSandbox`) when isolation matters.
     """
 
-    @staticmethod
-    def _resolve_path(path: str) -> Path:
-        """Resolve ``path`` against the current working directory if relative."""
-        return Path(path if os.path.isabs(path) else os.path.join(os.getcwd(), path))
+    environment: SandboxEnvironment | None
+
+    def __init__(self, cwd: str | os.PathLike[str] | None = None) -> None:
+        """Create a host execution environment rooted at ``cwd``."""
+        self.cwd = Path(cwd or os.getcwd()).resolve()
+        self.environment = {
+            "platform": platform.system(),
+            "cwd": str(self.cwd),
+            "shell": "PowerShell" if _IS_WINDOWS else "sh",
+            "temp_dir": tempfile.gettempdir(),
+        }
+
+    def _resolve_path(self, path: str) -> Path:
+        """Resolve ``path`` against this environment's working directory if relative."""
+        return Path(path) if os.path.isabs(path) else self.cwd / path
+
+    def _execution_cwd(self, cwd: str | None) -> str:
+        return str(self._resolve_path(cwd)) if cwd is not None else str(self.cwd)
 
     async def execute_streaming(
         self,
@@ -55,14 +69,14 @@ class NotASandboxLocalEnvironment(Sandbox):
         env: dict[str, str] | None = None,
         **kwargs: Any,
     ) -> AsyncGenerator[StreamChunk | ExecutionResult, None]:
-        """Execute a command on the host via ``sh -c``, streaming output.
+        """Execute a command through the host's native shell, streaming output.
 
         Args:
             command: The shell command to execute.
             timeout: Maximum execution time in seconds. ``None`` means no timeout.
             cwd: Working directory for this command. Defaults to the process's
                 current working directory.
-            env: Environment variables to set, applied via a shell ``export`` prefix.
+            env: Environment variables added to the child process environment.
             **kwargs: Additional keyword arguments for forward compatibility.
 
         Yields:
@@ -73,11 +87,36 @@ class NotASandboxLocalEnvironment(Sandbox):
             ValueError: If an environment variable name is invalid.
             SandboxTimeoutError: If execution exceeds ``timeout`` seconds.
         """
-        target_cwd = cwd if cwd is not None else os.getcwd()
-        env_prefix = build_shell_env_prefix(env)
-        full_command = f"cd {shlex.quote(target_cwd)} && {env_prefix}{command}"
-        async for chunk in _stream_process("sh", ["-c", full_command], timeout=timeout):
-            yield chunk
+        validate_env_keys(env or {})
+        target_cwd = self._execution_cwd(cwd)
+        if not _IS_WINDOWS:
+            async for chunk in _stream_process("sh", ["-c", command], timeout=timeout, cwd=target_cwd, env=env):
+                yield chunk
+            return
+
+        script = "\n".join(
+            (
+                "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8",
+                "$OutputEncoding = [System.Text.UTF8Encoding]::new($false)",
+                command,
+                "$ok = $?",
+                "if (-not $ok) { if ($LASTEXITCODE) { exit $LASTEXITCODE } else { exit 1 } }",
+            )
+        )
+        with tempfile.NamedTemporaryFile(suffix=".ps1", delete=False) as script_file:
+            script_path = Path(script_file.name)
+        script_path.write_text(script, encoding="utf-8-sig")
+        try:
+            async for chunk in _stream_process(
+                "powershell.exe",
+                ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", str(script_path)],
+                timeout=timeout,
+                cwd=target_cwd,
+                env=env,
+            ):
+                yield chunk
+        finally:
+            script_path.unlink(missing_ok=True)
 
     async def execute_code_streaming(
         self,
@@ -89,13 +128,7 @@ class NotASandboxLocalEnvironment(Sandbox):
         env: dict[str, str] | None = None,
         **kwargs: Any,
     ) -> AsyncGenerator[StreamChunk | ExecutionResult, None]:
-        """Execute code on the host by piping it to a language interpreter via ``sh``.
-
-        The code is base64-encoded and decoded inside a quoted heredoc, then piped to
-        the interpreter (``base64 -d << 'EOF' | <lang>``), so arbitrary source —
-        including shell metacharacters, quotes, and newlines — reaches the interpreter
-        without injection risk. ``language`` is validated against
-        :data:`~strands.sandbox.constants.LANGUAGE_PATTERN` first.
+        """Execute code on the host by feeding it directly to an interpreter.
 
         Args:
             code: The source code to execute.
@@ -103,7 +136,7 @@ class NotASandboxLocalEnvironment(Sandbox):
             timeout: Maximum execution time in seconds. ``None`` means no timeout.
             cwd: Working directory for execution. Defaults to the process's current
                 working directory.
-            env: Environment variables to set, applied via a shell ``export`` prefix.
+            env: Environment variables added to the child process environment.
             **kwargs: Additional keyword arguments for forward compatibility.
 
         Yields:
@@ -117,10 +150,16 @@ class NotASandboxLocalEnvironment(Sandbox):
         """
         if not LANGUAGE_PATTERN.fullmatch(language):
             raise ValueError(f"language parameter contains invalid characters: {language}")
-        encoded = base64.b64encode(code.encode()).decode("ascii")
-        eof = f"STRANDS_EOF_{uuid.uuid4().hex[:16]}"
-        command = f"base64 -d << '{eof}' | {language}\n{encoded}\n{eof}"
-        async for chunk in self.execute_streaming(command, timeout=timeout, cwd=cwd, env=env, **kwargs):
+        validate_env_keys(env or {})
+        async for chunk in _stream_process(
+            language,
+            [],
+            timeout=timeout,
+            enoent_message=f"Language interpreter not found: {language}",
+            cwd=self._execution_cwd(cwd),
+            env=env,
+            input_data=code.encode(),
+        ):
             yield chunk
 
     async def read_file(self, path: str, **kwargs: Any) -> bytes:

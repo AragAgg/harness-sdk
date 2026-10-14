@@ -1,20 +1,18 @@
 """Tests for the host execution environment (``NotASandboxLocalEnvironment``).
 
 Mirrors ``strands-ts/src/sandbox/__tests__/not-a-sandbox-local-environment.test.node.ts``.
-Command and code execution spawn a real ``sh``; file operations hit the host
-filesystem directly. These require a POSIX shell, so they are skipped on Windows.
+Command and code execution use the host's native shell and interpreter; file
+operations hit the host filesystem directly.
 """
 
-import os
 import sys
+from pathlib import Path
 
 import pytest
 
 from strands.sandbox import FileInfo
-from strands.sandbox.errors import SandboxPathNotFoundError
+from strands.sandbox.errors import SandboxPathNotFoundError, SandboxTimeoutError
 from strands.sandbox.not_a_sandbox_local_environment import NotASandboxLocalEnvironment
-
-pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="POSIX shell required")
 
 
 @pytest.fixture
@@ -22,32 +20,39 @@ def sandbox() -> NotASandboxLocalEnvironment:
     return NotASandboxLocalEnvironment()
 
 
+def _shell(posix: str, windows: str) -> str:
+    return windows if sys.platform == "win32" else posix
+
+
+_PYTHON = Path(sys.executable).name
+
+
 # ---- execute ----
 
 
 @pytest.mark.asyncio
 async def test_execute_runs_a_command(sandbox):
-    result = await sandbox.execute("echo hello")
+    result = await sandbox.execute(_shell("echo hello", "Write-Output hello"))
     assert result.exit_code == 0
     assert result.stdout == "hello\n"
 
 
 @pytest.mark.asyncio
 async def test_execute_respects_cwd_option(sandbox, tmp_path):
-    result = await sandbox.execute("pwd", cwd=str(tmp_path))
-    assert result.stdout.strip().endswith(os.path.basename(str(tmp_path)))
+    result = await sandbox.execute(_shell("pwd", "(Get-Location).Path"), cwd=str(tmp_path))
+    assert Path(result.stdout.strip()).resolve() == tmp_path.resolve()
 
 
 @pytest.mark.asyncio
 async def test_execute_reports_nonzero_exit_and_stderr(sandbox):
-    result = await sandbox.execute("echo oops >&2; exit 3")
+    result = await sandbox.execute(_shell("echo oops >&2; exit 3", "[Console]::Error.WriteLine('oops'); exit 3"))
     assert result.exit_code == 3
     assert result.stderr == "oops\n"
 
 
 @pytest.mark.asyncio
 async def test_execute_applies_env_option(sandbox):
-    result = await sandbox.execute("printenv GREETING", env={"GREETING": "hi"})
+    result = await sandbox.execute(_shell("printenv GREETING", "Write-Output $env:GREETING"), env={"GREETING": "hi"})
     assert result.stdout == "hi\n"
 
 
@@ -56,7 +61,7 @@ async def test_execute_applies_env_option(sandbox):
 
 @pytest.mark.asyncio
 async def test_execute_code_runs_interpreter(sandbox, tmp_path):
-    result = await sandbox.execute_code("print(2 + 2)", "python3", cwd=str(tmp_path))
+    result = await sandbox.execute_code("print(2 + 2)", _PYTHON, cwd=str(tmp_path))
     assert result.exit_code == 0
     assert result.stdout == "4\n"
 
@@ -69,8 +74,16 @@ async def test_execute_code_rejects_invalid_language(sandbox):
 
 @pytest.mark.asyncio
 async def test_execute_code_applies_env_option(sandbox):
-    result = await sandbox.execute_code('import os; print(os.environ["GREETING"])', "python3", env={"GREETING": "hi"})
+    result = await sandbox.execute_code('import os; print(os.environ["GREETING"])', _PYTHON, env={"GREETING": "hi"})
     assert result.stdout == "hi\n"
+
+
+@pytest.mark.asyncio
+async def test_execute_code_preserves_split_utf8_and_times_out(sandbox):
+    utf8 = "import os,time;os.write(1, bytes([0xe2]));time.sleep(.02);os.write(1, bytes([0x82,0xac]))"
+    assert (await sandbox.execute_code(utf8, _PYTHON)).stdout == "€"
+    with pytest.raises(SandboxTimeoutError):
+        await sandbox.execute_code("import time; time.sleep(60)", _PYTHON, timeout=0.1)
 
 
 # ---- read/write (native fs) ----
@@ -167,10 +180,21 @@ async def test_list_files_on_a_file_path_raises(sandbox, tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_relative_path_resolves_against_cwd(sandbox, tmp_path, monkeypatch):
+async def test_relative_path_resolves_against_cwd(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
+    sandbox = NotASandboxLocalEnvironment()
     await sandbox.write_text("relative-probe.txt", "relative")
     assert (tmp_path / "relative-probe.txt").read_text() == "relative"
+
+
+@pytest.mark.asyncio
+async def test_configured_cwd_roots_relative_operations(tmp_path):
+    sandbox = NotASandboxLocalEnvironment(tmp_path)
+    await sandbox.write_text("relative-probe.txt", "relative")
+    assert (tmp_path / "relative-probe.txt").read_text() == "relative"
+    assert sandbox.environment is not None
+    assert sandbox.environment["cwd"] == str(tmp_path.resolve())
+    assert sandbox.environment["shell"] == ("PowerShell" if sys.platform == "win32" else "sh")
 
 
 @pytest.mark.asyncio

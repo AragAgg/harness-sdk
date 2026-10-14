@@ -11,6 +11,16 @@
 export type StreamType = 'stdout' | 'stderr'
 
 /**
+ * Runtime metadata reported by a sandbox that knows its own environment.
+ */
+export interface SandboxEnvironment {
+  readonly platform?: string
+  readonly cwd?: string
+  readonly shell?: string
+  readonly tempDir?: string
+}
+
+/**
  * A typed chunk of streaming output from command or code execution.
  *
  * Allows consumers to distinguish stdout from stderr during streaming,

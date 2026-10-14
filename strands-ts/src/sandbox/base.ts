@@ -6,7 +6,7 @@
  * code execution, and file I/O) and convenience wrappers for common patterns.
  */
 
-import type { ExecutionResult, FileInfo, StreamChunk } from './types.js'
+import type { ExecutionResult, FileInfo, SandboxEnvironment, StreamChunk } from './types.js'
 import type { Tool } from '../tools/tool.js'
 
 /**
@@ -40,6 +40,9 @@ export interface ExecuteOptions {
  * the stream and return the final result.
  */
 export abstract class Sandbox {
+  /** Runtime metadata when the sandbox can report it without executing probes. */
+  readonly environment?: SandboxEnvironment
+
   /**
    * Execute a shell command, streaming output.
    *

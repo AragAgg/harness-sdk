@@ -1,15 +1,18 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import fs from 'fs'
+import os from 'os'
 import path from 'path'
 import { NotASandboxLocalEnvironment } from '../not-a-sandbox-local-environment.js'
-import { SandboxPathNotFoundError } from '../errors.js'
+import { SandboxPathNotFoundError, SandboxTimeoutError } from '../errors.js'
 
-const TEST_DIR = '/tmp/strands-test-not-a-sandbox'
+const TEST_DIR = path.join(os.tmpdir(), 'strands-test-not-a-sandbox')
 // Written relative (resolved against process.cwd()) to exercise _resolvePath; cleaned up below.
 const REL_NAME = 'strands-not-a-sandbox-rel-probe.txt'
 const REL_ABS = path.join(process.cwd(), REL_NAME)
 
-describe.skipIf(process.platform === 'win32')('NotASandboxLocalEnvironment', () => {
+const shell = (posix: string, windows: string): string => (process.platform === 'win32' ? windows : posix)
+
+describe('NotASandboxLocalEnvironment', () => {
   let sandbox: NotASandboxLocalEnvironment
 
   beforeEach(() => {
@@ -25,31 +28,46 @@ describe.skipIf(process.platform === 'win32')('NotASandboxLocalEnvironment', () 
 
   describe('execute', () => {
     it('runs a command on the host', async () => {
-      const result = await sandbox.execute('echo hello')
+      const result = await sandbox.execute(shell('echo hello', 'Write-Output hello'))
       expect(result.exitCode).toBe(0)
       expect(result.stdout).toBe('hello\n')
     })
 
     it('respects the cwd option', async () => {
-      const result = await sandbox.execute('pwd', { cwd: TEST_DIR })
-      expect(result.stdout.trim()).toBe(TEST_DIR)
+      const result = await sandbox.execute(shell('pwd', '(Get-Location).Path'), { cwd: TEST_DIR })
+      expect(fs.realpathSync(result.stdout.trim())).toBe(fs.realpathSync(TEST_DIR))
     })
 
     it('reports a non-zero exit code and stderr from a failing command', async () => {
-      const result = await sandbox.execute('echo oops >&2; exit 3')
+      const result = await sandbox.execute(shell('echo oops >&2; exit 3', "[Console]::Error.WriteLine('oops'); exit 3"))
       expect(result.exitCode).toBe(3)
       expect(result.stderr).toBe('oops\n')
     })
 
     it('applies the env option', async () => {
-      const result = await sandbox.execute('echo "$GREETING"', { env: { GREETING: 'hi' } })
+      const result = await sandbox.execute(shell('echo "$GREETING"', 'Write-Output $env:GREETING'), {
+        env: { GREETING: 'hi' },
+      })
       expect(result.stdout).toBe('hi\n')
+    })
+
+    it('preserves split UTF-8 and terminates timed-out code', async () => {
+      const utf8 = [
+        'process.stdout.write(Buffer.from([0xe2]))',
+        'setTimeout(() => process.stdout.write(Buffer.from([0x82, 0xac])), 20)',
+      ].join(';')
+      expect((await sandbox.executeCode(utf8, 'node')).stdout).toBe('€')
+      await expect(sandbox.executeCode('setInterval(() => {}, 1000)', 'node', { timeout: 0.1 })).rejects.toBeInstanceOf(
+        SandboxTimeoutError
+      )
     })
   })
 
   describe('executeCode', () => {
     it('runs code through the named interpreter', async () => {
-      const result = await sandbox.executeCode('print(2 + 2)', 'python3', { cwd: TEST_DIR })
+      const result = await sandbox.executeCode('process.stdout.write(String(2 + 2) + "\\n")', 'node', {
+        cwd: TEST_DIR,
+      })
       expect(result.exitCode).toBe(0)
       expect(result.stdout).toBe('4\n')
     })
@@ -59,7 +77,7 @@ describe.skipIf(process.platform === 'win32')('NotASandboxLocalEnvironment', () 
     })
 
     it('applies the env option', async () => {
-      const result = await sandbox.executeCode('import os; print(os.environ["GREETING"])', 'python3', {
+      const result = await sandbox.executeCode('process.stdout.write(process.env.GREETING + "\\n")', 'node', {
         env: { GREETING: 'hi' },
       })
       expect(result.stdout).toBe('hi\n')
@@ -145,6 +163,16 @@ describe.skipIf(process.platform === 'win32')('NotASandboxLocalEnvironment', () 
     it('resolves relative paths against process.cwd()', async () => {
       await sandbox.writeText(REL_NAME, 'relative')
       expect(fs.readFileSync(REL_ABS, 'utf8')).toBe('relative')
+    })
+
+    it('resolves relative paths and commands against a configured cwd', async () => {
+      const rooted = new NotASandboxLocalEnvironment({ cwd: TEST_DIR })
+      await rooted.writeText('rooted.txt', 'rooted')
+      expect(fs.readFileSync(path.join(TEST_DIR, 'rooted.txt'), 'utf8')).toBe('rooted')
+      expect(rooted.environment).toMatchObject({
+        cwd: path.resolve(TEST_DIR),
+        shell: process.platform === 'win32' ? 'PowerShell' : 'sh',
+      })
     })
   })
 })

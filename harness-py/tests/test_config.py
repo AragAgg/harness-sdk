@@ -64,6 +64,9 @@ def test_config_warns_about_unknown_keys_and_drops_them(caplog):
     assert "Ignoring unknown agent config keys: builtinTool, extra." in caplog.text
 
 
+_PROJECT_ROOT = Path("/project").resolve()
+
+
 @pytest.mark.parametrize(
     "key",
     [
@@ -508,10 +511,10 @@ def test_config_does_not_add_flat_siblings_to_the_import_path(tmp_path):
 @pytest.mark.parametrize(
     ("value", "expected"),
     [
-        ("./policy.cedar", "/project/policy.cedar"),
-        ("policies/policy.cedar", "/project/policies/policy.cedar"),
-        ("  ./policy.cedar  ", "/project/policy.cedar"),
-        ("/policies/policy.cedar", "/policies/policy.cedar"),
+        ("./policy.cedar", str(_PROJECT_ROOT / "policy.cedar")),
+        ("policies/policy.cedar", str(_PROJECT_ROOT / "policies/policy.cedar")),
+        ("  ./policy.cedar  ", str(_PROJECT_ROOT / "policy.cedar")),
+        ("/policies/policy.cedar", str(_PROJECT_ROOT / "/policies/policy.cedar")),
         ("~/policy.cedar", str(Path.home() / "policy.cedar")),
         ("ask", "ask"),
         ("  Require approval for writes.  ", "  Require approval for writes.  "),
