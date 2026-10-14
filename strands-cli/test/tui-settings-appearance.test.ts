@@ -1,10 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import {
-  ChatController,
-  DEFAULT_CHAT_SETTINGS,
-  type ChatBackend,
-  type CustomTheme,
-} from '../src/tui/chat/controller.js'
+import { ChatController, DEFAULT_CHAT_SETTINGS, type ChatBackend } from '../src/tui/chat/controller.js'
 import { settingsRows } from '../src/tui/chat/panels.js'
 
 const backend: ChatBackend = {
@@ -38,45 +33,37 @@ describe('appearance settings controller', () => {
           { label: 'Homeland', value: 'homeland' },
           { label: 'Merlin', value: 'merlin' },
           { label: 'Kikker', value: 'kikker' },
-          { label: 'Cyborg', value: 'circuit' },
+          { label: 'Oak', value: 'oak' },
           { label: 'Spectre', value: 'spectre' },
-          { label: 'Solar', value: 'solar' },
-          { label: 'Custom', value: 'custom' },
+          { label: 'Scarlet', value: 'scarlet' },
         ],
       },
     })
   })
 
-  it('atomically selects custom colors and isolates nested state from callers and snapshots', async () => {
-    const customTheme: CustomTheme = { base: 'merlin', light: { accent: '#123456' }, dark: { frog: '#abcdef' } }
+  it('applies a theme selection', async () => {
     const setSettings = vi.fn(async () => {})
-    const controller = new ChatController(backend, { settings: { customTheme }, setSettings })
-    customTheme.light.accent = '#000000'
-    expect(controller.getSnapshot().settings.customTheme.light.accent).toBe('#123456')
+    const controller = new ChatController(backend, { setSettings })
     await controller.submit('/settings')
-    expect(await setting(controller, `customTheme=${encodeURIComponent(JSON.stringify(customTheme))}`)).toBe(true)
-    expect(setSettings).toHaveBeenCalledWith({ frogTheme: 'custom', customTheme })
-    controller.getSnapshot().settings.customTheme.dark.frog = '#000000'
-    await setting(controller, 'animations')
-    expect(controller.getSnapshot().settings.customTheme.dark.frog).toBe('#abcdef')
-    expect(controller.getSnapshot().settings.frogTheme).toBe('custom')
-    expect(DEFAULT_CHAT_SETTINGS.customTheme).toEqual({ base: 'green', light: {}, dark: {} })
+    expect(await setting(controller, 'frogTheme=oak')).toBe(true)
+    expect(setSettings).toHaveBeenCalledWith({ frogTheme: 'oak' })
+    expect(controller.getSnapshot().settings.frogTheme).toBe('oak')
     await controller.dispose()
   })
 
-  it.each([
-    'customTheme=%',
-    `customTheme=${encodeURIComponent(JSON.stringify({ base: 'green', light: {}, dark: { accent: 'red' } }))}`,
-  ])('rejects malformed appearance input: %s', async (value) => {
-    const setSettings = vi.fn()
-    const controller = new ChatController(backend, { setSettings })
-    await controller.submit('/settings')
-    const before = globalThis.structuredClone(controller.getSnapshot().settings)
-    expect(await setting(controller, value)).toBe(false)
-    expect(setSettings).not.toHaveBeenCalled()
-    expect(controller.getSnapshot().settings).toEqual(before)
-    await controller.dispose()
-  })
+  it.each(['frogTheme=missing', 'frogTheme=%', 'frogTheme=oak=extra'])(
+    'rejects unknown appearance input: %s',
+    async (value) => {
+      const setSettings = vi.fn()
+      const controller = new ChatController(backend, { setSettings })
+      await controller.submit('/settings')
+      const before = globalThis.structuredClone(controller.getSnapshot().settings)
+      expect(await setting(controller, value)).toBe(false)
+      expect(setSettings).not.toHaveBeenCalled()
+      expect(controller.getSnapshot().settings).toEqual(before)
+      await controller.dispose()
+    }
+  )
 
   it('retains the old settings if persistence fails', async () => {
     const controller = new ChatController(backend, {
@@ -85,9 +72,7 @@ describe('appearance settings controller', () => {
       },
     })
     await controller.submit('/settings')
-    expect(
-      await setting(controller, `customTheme=${encodeURIComponent(JSON.stringify(DEFAULT_CHAT_SETTINGS.customTheme))}`)
-    ).toBe(false)
+    expect(await setting(controller, 'frogTheme=scarlet')).toBe(false)
     expect(controller.getSnapshot().settings.frogTheme).toBe('green')
     expect(controller.getSnapshot().panel?.kind).toBe('error')
     await controller.dispose()

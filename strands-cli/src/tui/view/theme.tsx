@@ -16,10 +16,11 @@ import {
   type ThemeSettings,
   type ThemeColors,
 } from '../chat/types.js'
-import { currentColorMode, subscribeColorMode } from './theme-detection.js'
+import { currentCanvasColor, currentColorMode, subscribeColorMode } from './theme-detection.js'
 import { useFadeAnsi, useFadeColor } from './fade-in.js'
 
-export type Theme = ThemeColors & { mode: ResolvedColorMode }
+// `canvas` is the terminal's reported background color; the palette background stands in when the terminal does not report one.
+export type Theme = ThemeColors & { mode: ResolvedColorMode; canvas: string }
 
 const BASE_COLORS = {
   dark: {
@@ -34,6 +35,8 @@ const BASE_COLORS = {
     success: '#68f58a',
     warning: '#ffb454',
     error: '#ff727c',
+    diffAdd: '#173a22',
+    diffRemove: '#46202a',
   },
   light: {
     background: '#ffffff',
@@ -47,41 +50,42 @@ const BASE_COLORS = {
     success: '#166534',
     warning: '#854400',
     error: '#b42332',
+    diffAdd: '#dcf5e2',
+    diffRemove: '#fbe1e3',
   },
 } satisfies Record<ResolvedColorMode, Omit<ThemeColors, 'accent' | 'frog'>>
 
 const ACCENTS = {
-  green: { light: '#166534', dark: '#68f58a' },
+  green: { light: '#007439', dark: '#00cc60' },
   minimal: { light: '#35424a', dark: '#d2d9dd' },
   homeland: { light: '#006581', dark: '#5ad3f4' },
-  merlin: { light: '#7036a8', dark: '#c49bff' },
+  merlin: { light: '#5d3a97', dark: '#ad95e8' },
   kikker: { light: '#934600', dark: '#ff9d3d' },
-  circuit: { light: '#234e96', dark: '#79aaff' },
-  spectre: { light: '#a71935', dark: '#ff6b82' },
-  solar: { light: '#805400', dark: '#ffd166' },
-} satisfies Record<Exclude<FrogTheme, 'custom'>, Record<ResolvedColorMode, string>>
+  oak: { light: '#754322', dark: '#d0a071' },
+  spectre: { light: '#535d6b', dark: '#a5aebc' },
+  scarlet: { light: '#a51f38', dark: '#ff7888' },
+} satisfies Record<FrogTheme, Record<ResolvedColorMode, string>>
 
 const FROG_COLORS = {
-  green: { light: '#5ab36e', dark: '#81ff9d' },
+  green: { light: '#02a435', dark: '#00cc60' },
   minimal: { light: '#1c1e22', dark: '#ededed' },
   homeland: { light: '#5a9e64', dark: '#80e28f' },
-  merlin: { light: '#865cb0', dark: '#c084fc' },
+  merlin: { light: '#5b4788', dark: '#8265c2' },
   kikker: { light: '#b35900', dark: '#ff7f00' },
-  circuit: { light: '#7a7f86', dark: '#aeb6bf' },
+  oak: { light: '#724a2c', dark: '#a36a3f' },
   spectre: { light: '#111317', dark: '#181b21' },
-  solar: { light: '#b77900', dark: '#ffd166' },
-} satisfies Record<Exclude<FrogTheme, 'custom'>, Record<ResolvedColorMode, string>>
+  scarlet: { light: '#9d212c', dark: '#e02f3f' },
+} satisfies Record<FrogTheme, Record<ResolvedColorMode, string>>
 
-export function getTheme(settings: ThemeSettings, detectedMode?: ResolvedColorMode): Theme {
+export function getTheme(settings: ThemeSettings, detectedMode?: ResolvedColorMode, canvas?: string): Theme {
   const mode = detectedMode ?? currentColorMode()
-  const base = settings.frogTheme === 'custom' ? settings.customTheme.base : settings.frogTheme
-  const custom = settings.frogTheme === 'custom' ? settings.customTheme[mode] : undefined
+  // A supplied mode renders a preview, not the live terminal, so the detected canvas does not apply.
+  const detectedCanvas = detectedMode === undefined ? currentCanvasColor() : undefined
   return {
     ...BASE_COLORS[mode],
-    accent: ACCENTS[base][mode],
-    frog: FROG_COLORS[base][mode],
-    ...(custom?.accent ? { accent: custom.accent } : {}),
-    ...(custom?.frog ? { frog: custom.frog } : {}),
+    accent: ACCENTS[settings.frogTheme][mode],
+    frog: FROG_COLORS[settings.frogTheme][mode],
+    canvas: canvas ?? detectedCanvas ?? BASE_COLORS[mode].background,
     mode,
   }
 }
@@ -100,8 +104,10 @@ export function ThemeProvider({
   children: ReactNode
 }): ReactElement {
   const terminalMode = useSyncExternalStore(subscribeColorMode, currentColorMode, currentColorMode)
+  const terminalCanvas = useSyncExternalStore(subscribeColorMode, currentCanvasColor, currentCanvasColor)
   const mode = detectedMode ?? terminalMode
-  const theme = useMemo(() => getTheme(settings, mode), [settings.frogTheme, settings.customTheme, mode])
+  const canvas = detectedMode === undefined ? terminalCanvas : undefined
+  const theme = useMemo(() => getTheme(settings, mode, canvas), [settings.frogTheme, mode, canvas])
   return <ThemeContext value={theme}>{children}</ThemeContext>
 }
 
