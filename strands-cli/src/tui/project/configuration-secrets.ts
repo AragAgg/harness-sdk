@@ -1,4 +1,5 @@
 import type { HarnessAgentConfig } from '@strands-agents/harness'
+import { isRecord } from '../values.js'
 
 const SECRET_KEY_PATTERN =
   /(?:secret|token|password|passphrase|credential|authorization|api.?key|access.?key|private.?key|pwd|connection.?string)/iu
@@ -32,17 +33,17 @@ export function scanConfigSecrets(config: HarnessAgentConfig, mcpServers: Record
 
 function validatePortableMcp(servers: Record<string, unknown>): void {
   for (const [name, raw] of Object.entries(servers)) {
-    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    if (!isRecord(raw)) {
       continue
     }
-    const server = raw as Record<string, unknown>
+    const server = raw
     const label = `MCP server ${JSON.stringify(name)}`
     for (const field of ['env', 'headers']) {
       const values = server[field]
-      if (!values || typeof values !== 'object' || Array.isArray(values)) {
+      if (!isRecord(values)) {
         continue
       }
-      for (const [key, value] of Object.entries(values as Record<string, unknown>)) {
+      for (const [key, value] of Object.entries(values)) {
         if (typeof value !== 'string' || !isEnvironmentReference(value)) {
           throw new Error(`${label} ${field}.${key} must use an environment placeholder.`)
         }

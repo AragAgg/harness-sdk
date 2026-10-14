@@ -5,8 +5,8 @@ import { dirname, join } from 'node:path'
 import { unzipSync, zipSync } from 'fflate'
 import { afterEach, beforeEach, expect, it } from 'vitest'
 
-import { exportSourceProject } from '../src/tui/project/export.js'
-import { importAgentProject } from '../src/tui/project/import.js'
+import { exportSourceProject } from '../../../src/tui/project/export.js'
+import { importAgentProject } from '../../../src/tui/project/import.js'
 
 let root: string
 
@@ -42,7 +42,7 @@ it('honors a safe marker and rejects a marker escaping through an ancestor', asy
   expect(() => importAgentProject(root)).toThrow('Invalid .strands-entrypoint')
 })
 
-it('preserves authored bytes and selects an arbitrary source through repeated ZIP export', async () => {
+it('preserves authored bytes through ZIP and directory export', async () => {
   const source = join(root, 'source')
   const authored = {
     'src/custom.mjs': Buffer.from('\uFEFF// Grüße 🐸\r\nexport const agent = {}\r\n'),
@@ -67,6 +67,13 @@ it('preserves authored bytes and selects an arbitrary source through repeated ZI
     expect(Buffer.from(entries['.strands-entrypoint']!).toString()).toBe('src/custom.mjs\n')
     project = importAgentProject(archive)
   }
+
+  const directory = join(root, 'authored-folder')
+  await exportSourceProject(project, 'Authored', 'typescript', [], directory, 'directory')
+  for (const [name, contents] of Object.entries(authored)) {
+    expect(await readFile(join(directory, name))).toEqual(contents)
+  }
+  expect(await readFile(join(directory, '.strands-entrypoint'), 'utf8')).toBe('src/custom.mjs\n')
 })
 
 it('does not discard a ZIP manifest and assets to find an unmarked nested module', async () => {
