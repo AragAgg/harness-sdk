@@ -3,22 +3,26 @@ import { makePanel } from '../chat/panels.js'
 import type {
   ChatController,
   ChatControllerApi,
+  ChatInput,
   NewChatPanel,
   ChatPanel,
   ChatPanelRow,
   ChatSnapshot,
+  ChatSettings,
   ChatTurn,
   ChatVoiceStore,
 } from '../chat/controller.js'
-import { parseCommandInvocation } from '../chat/commands.js'
+import { parseCommandInvocation, type CommandAssistance } from '../chat/commands.js'
 import { isUnresolvedBackgroundTask } from '../chat/controller-helpers.js'
 import { errorMessage, sanitizeTerminalText } from '../terminal/sanitize.js'
 import type { AgentMessaging } from '../messaging.js'
+import type { ImportedAgentProject } from '../project/import.js'
+import { watchAgentProject } from '../project/watch.js'
 import { conversationStatus, conversationTitle, readConversationValue, unquote } from './conversation-helpers.js'
 import { sessionWorkspaceLabel, type SessionTarget } from './sessions.js'
 import type { VoiceInput } from '../voice/session.js'
 
-const MANAGER_COMMANDS = new Set(['agents', 'fork', 'rename', 'voice'])
+const MANAGER_COMMANDS = new Set(['agents', 'fork', 'voice'])
 const AGENTS_PANEL_TITLE = 'Agents'
 
 interface ConversationRecord {
@@ -35,6 +39,9 @@ interface ConversationManagerOptions {
   dispose?(): void | Promise<void>
   agentMessaging?: AgentMessaging
   voice?: VoiceInput
+  project?: ImportedAgentProject
+  projectPrivatePaths?: readonly string[]
+  reloadProject?(conversationId: string): void
 }
 
 export class ConversationManager implements ChatControllerApi {
@@ -47,6 +54,8 @@ export class ConversationManager implements ChatControllerApi {
   private readonly _agentMessaging: AgentMessaging | undefined
   private readonly _stopAgentMessaging: (() => void) | undefined
   private readonly _voice: ConversationVoice
+  private readonly _reloadProject: ConversationManagerOptions['reloadProject']
+  private readonly _stopProjectWatch: (() => void) | undefined
   private _activeId: string
   private _panel: ChatPanel | undefined
   private _snapshot: ChatSnapshot
@@ -54,6 +63,7 @@ export class ConversationManager implements ChatControllerApi {
   private _nextPanel = 1
   private _forking = false
   private _resuming = false
+  private _projectReloadPending = false
   private _closed = false
   private _disposed = false
 
@@ -62,9 +72,10 @@ export class ConversationManager implements ChatControllerApi {
     this._resume = options.resume
     this._disposeShared = options.dispose
     this._agentMessaging = options.agentMessaging
+    this._reloadProject = options.reloadProject
     this._voice = new ConversationVoice(options.voice, () => this._active, {
       panel: (rows): void => {
-        this._panel = rows ? this._makePanel({ kind: 'voice', title: 'voice', rows }) : undefined
+        this._panel = rows ? this._makePanel({ kind: 'voice', title: 'Voice', rows }) : undefined
         this._emit()
       },
       error: (title, label, message): void => this._openError(title, label, message),
@@ -80,6 +91,22 @@ export class ConversationManager implements ChatControllerApi {
       primary.backend.info?.().description || 'Primary agent'
     )
     this._snapshot = this._buildSnapshot()
+    const project = options.project
+    this._stopProjectWatch =
+      project && options.reloadProject
+        ? watchAgentProject(
+            project,
+            () => {
+              for (const { controller } of this._conversations.values()) {
+                controller.refreshConfiguration()
+              }
+              this._projectReloadPending = true
+              this._reloadProjectIfReady()
+            },
+            (error) => this._openError('live reload unavailable', project.root, errorMessage(error)),
+            options.projectPrivatePaths
+          )
+        : undefined
     this._stopAgentMessaging = this._agentMessaging?.subscribe(() => {
       if (this._panel?.kind === 'agents' && this._panel.title === AGENTS_PANEL_TITLE) {
         this._openAgentsPanel(false)
@@ -89,7 +116,7 @@ export class ConversationManager implements ChatControllerApi {
     this._voice.connect(() => {
       if (this._panel?.kind === 'voice') {
         const id = this._panel.id
-        this._panel = { ...this._makePanel({ kind: 'voice', title: 'voice', rows: this._voice.rows() }), id }
+        this._panel = { ...this._makePanel({ kind: 'voice', title: 'Voice', rows: this._voice.rows() }), id }
       }
       this._emit()
     })
@@ -103,6 +130,10 @@ export class ConversationManager implements ChatControllerApi {
   }
 
   readonly getSnapshot = (): ChatSnapshot => this._snapshot
+
+  get resumeSession(): ChatController['resumeSession'] {
+    return this._active.controller.resumeSession
+  }
 
   captureConversation(conversationId = this._activeId): ReturnType<ChatController['captureConversation']> {
     if (
@@ -123,7 +154,7 @@ export class ConversationManager implements ChatControllerApi {
     return conversation.controller.captureConversation()
   }
 
-  pauseVoiceInput(): (target: ChatControllerApi) => void {
+  pauseVoiceInput(): () => void {
     return this._voice.pauseInput()
   }
 
@@ -160,18 +191,28 @@ export class ConversationManager implements ChatControllerApi {
     return this._active.controller.actionableCommandToken(input)
   }
 
+  commandAssistance(input: string): CommandAssistance | undefined {
+    return this._active.controller.commandAssistance(input)
+  }
+
   start(firstRequest?: string): Promise<void> {
     return this._active.controller.start(firstRequest)
   }
 
-  async submit(input: string): Promise<ChatTurn | undefined> {
-    const prompt = input.trim()
-    if (!prompt || this._closed) {
+  async submit(input: ChatInput): Promise<ChatTurn | undefined> {
+    const prompt = typeof input === 'string' ? input.trim() : input.text.trim()
+    const hasAttachments = typeof input !== 'string' && input.attachments.length > 0
+    if ((!prompt && !hasAttachments) || this._closed) {
       return undefined
     }
-    if (['exit', 'quit', '/exit'].includes(prompt.toLowerCase())) {
+    if (!hasAttachments && ['exit', 'quit', '/exit'].includes(prompt.toLowerCase())) {
       this.close()
       return undefined
+    }
+    if (hasAttachments) {
+      this._panel = undefined
+      this._emit()
+      return this._active.controller.submit({ text: prompt, attachments: input.attachments })
     }
     const invocation = parseCommandInvocation(prompt)
     const command = invocation?.prefix === '/' ? invocation.name.toLowerCase() : undefined
@@ -183,14 +224,6 @@ export class ConversationManager implements ChatControllerApi {
     if (command === 'fork') {
       return this._forkConversation(unquote(argument))
     }
-    if (command === 'rename') {
-      if (argument) {
-        this._renameConversation(unquote(argument))
-      } else {
-        this._openRenamePanel()
-      }
-      return undefined
-    }
     if (command === 'voice') {
       await this._voice.handleCommand(argument)
       return undefined
@@ -201,6 +234,9 @@ export class ConversationManager implements ChatControllerApi {
   }
 
   steer(input: string): Promise<ChatTurn | undefined> {
+    if (['exit', 'quit', '/exit'].includes(input.trim().toLowerCase())) {
+      return this.submit(input)
+    }
     const invocation = parseCommandInvocation(input.trim())
     if (invocation?.prefix === '/' && MANAGER_COMMANDS.has(invocation.name.toLowerCase())) {
       return this.submit(input)
@@ -208,8 +244,8 @@ export class ConversationManager implements ChatControllerApi {
     return this._active.controller.steer(input)
   }
 
-  steerQueued(id?: string): boolean {
-    return this._active.controller.steerQueued(id)
+  setSettings(settings: Partial<ChatSettings>): Promise<boolean> {
+    return this._active.controller.setSettings(settings)
   }
 
   updateQueuedPrompt(id: string, prompt: string): boolean {
@@ -247,6 +283,7 @@ export class ConversationManager implements ChatControllerApi {
     }
     this._voice.disconnect()
     this._stopAgentMessaging?.()
+    this._stopProjectWatch?.()
     await Promise.allSettled([
       ...[...this._conversations.values()].map((conversation) => conversation.controller.dispose()),
       this._voice.dispose(),
@@ -266,10 +303,6 @@ export class ConversationManager implements ChatControllerApi {
   }
 
   async activatePanelRow(row: ChatPanelRow): Promise<boolean> {
-    if (this._panel?.kind === 'rename' && row.value?.startsWith('rename:')) {
-      this._renameConversation(row.value.slice('rename:'.length))
-      return true
-    }
     if (this._panel?.kind === 'voice') {
       return row.value ? this._voice.handlePanelAction(row.value) : false
     }
@@ -359,6 +392,7 @@ export class ConversationManager implements ChatControllerApi {
     } finally {
       this._resuming = false
       this._emit()
+      this._reloadProjectIfReady()
     }
   }
 
@@ -385,16 +419,7 @@ export class ConversationManager implements ChatControllerApi {
     }
 
     this._forking = true
-    this._panel = this._makePanel({
-      kind: 'agents',
-      title: 'Forking agent',
-      rows: [
-        {
-          label: prompt ? conversationTitle(prompt) : `Fork ${this._nextConversation}`,
-          description: `Copying ${source.title} with its current conversation and agent configuration.`,
-        },
-      ],
-    })
+    this._panel = undefined
     this._emit()
     try {
       const controller = await this._fork(source.controller)
@@ -416,6 +441,7 @@ export class ConversationManager implements ChatControllerApi {
     } finally {
       this._forking = false
       this._emit()
+      this._reloadProjectIfReady()
     }
   }
 
@@ -433,10 +459,29 @@ export class ConversationManager implements ChatControllerApi {
           this._openAgentsPanel(false)
         }
         this._emit()
+        this._reloadProjectIfReady()
       }),
     }
     this._conversations.set(endpointId, record)
     this._agentMessaging?.rename(endpointId, record.title)
+  }
+
+  private _reloadProjectIfReady(): void {
+    if (
+      !this._projectReloadPending ||
+      !this._reloadProject ||
+      this._closed ||
+      this._disposed ||
+      this._forking ||
+      this._resuming ||
+      [...this._conversations.values()].some(
+        ({ controller }) => controller.busy || controller.getSnapshot().tasks.some(isUnresolvedBackgroundTask)
+      )
+    ) {
+      return
+    }
+    this._projectReloadPending = false
+    this._reloadProject(this._activeId)
   }
 
   private _switchConversation(id: string): boolean {
@@ -447,27 +492,6 @@ export class ConversationManager implements ChatControllerApi {
     this._panel = undefined
     this._emit()
     return true
-  }
-
-  private _renameConversation(name: string): void {
-    const title = conversationTitle(name)
-    if (!name.trim()) {
-      this._openError('rename failed', '/rename', 'Use /rename <name> to name the currently viewed agent.')
-      return
-    }
-    this._active.title = title
-    this._agentMessaging?.rename(this._active.id, title)
-    this._panel = undefined
-    this._emit()
-  }
-
-  private _openRenamePanel(): void {
-    this._panel = this._makePanel({
-      kind: 'rename',
-      title: 'Rename agent',
-      rows: [{ label: 'Current name', description: this._active.title }],
-    })
-    this._emit()
   }
 
   private _openAgentsPanel(emit = true): void {
@@ -542,9 +566,22 @@ export class ConversationManager implements ChatControllerApi {
     const active = this._active.controller.getSnapshot()
     const { panel: activePanel, ...base } = active
     const panel = activePanel?.kind === 'permission' ? activePanel : (this._panel ?? activePanel)
+    const afterTurnId = active.activeTurn?.id ?? active.completedTurns.at(-1)?.id
     return {
       ...base,
       ...(panel ? { panel } : {}),
+      notices:
+        this._forking && !this._closed && !this._disposed
+          ? [
+              ...active.notices,
+              {
+                id: 'manager-fork-progress',
+                text: 'Forking agent…',
+                status: 'running',
+                ...(afterTurnId ? { afterTurnId } : {}),
+              },
+            ]
+          : active.notices,
       status: this._closed ? 'closed' : active.status,
       ...(this._voice.snapshot ? { voice: { ...this._voice.snapshot } } : {}),
       runtime: {
